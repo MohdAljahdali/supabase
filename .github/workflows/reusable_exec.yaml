@@ -1,0 +1,72 @@
+on:
+  workflow_call:
+    inputs:
+      runs_on:
+        type: string
+        required: true
+      with_authelia:
+        type: boolean
+        required: false
+        default: false
+      with_authelia_and_redis:
+        type: boolean
+        required: false
+        default: false
+      artifact_name:
+        type: string
+        required: true
+      repo:
+        type: string
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  reusable_build:
+    timeout-minutes: 20
+    runs-on: ${{ inputs.runs_on }}
+    env:
+      CI: true
+      ARTIFACT: ${{ inputs.artifact_name }}
+      REPO: ${{ inputs.repo }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: execute setup script
+        # after checkout, pwd is the root of the repo thats why cd ../
+        # When executing script with sudo, by default sudo doesn't pass env vars to script. -E flag solves that
+        run: |
+          set -ex
+          mv setup.sh ../setup.sh
+          cd ../
+          chmod +x setup.sh
+          params=()
+          with_authelia=${{inputs.with_authelia}}
+          with_authelia_and_redis=${{inputs.with_authelia_and_redis}}
+
+          [[ "$with_authelia" == true || "$with_authelia_and_redis" == true ]] && params+=(--with-authelia)
+
+          WITH_REDIS="$with_authelia_and_redis" sudo -E ./setup.sh "${params[@]}"
+
+      - name: Init & wait for containers to be healthy
+        run: cd docker && docker compose up -d --quiet-pull --wait-timeout 120
+
+      - name: Generate tar
+        run: |
+          set -ex
+          cd docker
+          docker compose kill &> /dev/null
+          cd ../../
+          sudo tar --exclude "$REPO/docker/volumes/db/data" --exclude "$REPO/docker/volumes/caddy" --exclude "$REPO/.git" \
+          -czvf ~/"$ARTIFACT".tar.gz "$REPO" > /dev/null
+
+      - name: Upload generated tarball
+        uses: actions/upload-artifact@v4
+        # action cannot detect "$ARTIFACT" env var
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ~/${{ inputs.artifact_name }}.tar.gz
+          retention-days: 5
+          if-no-files-found: error

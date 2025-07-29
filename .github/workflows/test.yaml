@@ -1,0 +1,74 @@
+name: Test supabase docker containers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["docker/**/*", setup.sh]
+  pull_request:
+    types: [opened, synchronize, reopened] # default behavior
+    paths: ["docker/**/*", setup.sh]
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # pre_job can't be used in reusable workflow https://github.com/fkirc/skip-duplicate-actions/issues/327
+  pre_job:
+    permissions:
+      actions: write
+      contents: read
+    # continue-on-error: true
+    runs-on: ubuntu-latest
+    outputs:
+      should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@v5
+        with:
+          concurrent_skipping: "same_content"
+          skip_after_successful_duplicate: "true"
+          cancel_others: "true"
+
+  build-basic-auth:
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    uses: "./.github/workflows/reusable_exec.yaml"
+    with:
+      runs_on: ${{matrix.os}}
+      artifact_name: "final"
+      repo: ${{github.event.repository.name}}
+
+  build-with-authelia:
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    uses: "./.github/workflows/reusable_exec.yaml"
+    with:
+      runs_on: ${{matrix.os}}
+      with_authelia: true
+      artifact_name: "final_with_authelia"
+      repo: ${{github.event.repository.name}}
+
+  build-with-authelia-and-redis:
+    needs: pre_job
+    if: needs.pre_job.outputs.should_skip != 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    uses: "./.github/workflows/reusable_exec.yaml"
+    with:
+      runs_on: ${{matrix.os}}
+      with_authelia_and_redis: true
+      artifact_name: "final_with_authelia_and_redis"
+      repo: ${{github.event.repository.name}}
